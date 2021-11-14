@@ -1,0 +1,3 @@
+[submodule "libnyx"]
+	path = libnyx
+	url = git@github.com:nyx-fuzz/libnyx.git
