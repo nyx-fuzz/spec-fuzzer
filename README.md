@@ -10,7 +10,7 @@ More details can be found in our papers.
 
 ## Usage
 
-Getting this fuzzer running is quite simple: move to the `rust_fuzzer/` folder and run `cargo run --release -- -h` to get the following describtion on all available parameters:
+Getting this fuzzer running is quite simple: run `./setup.sh`, move to the `rust_fuzzer/` folder and run `cargo run --release -- -h` to get the following describtion on all available parameters:
 
 ```
 Fuzz EVERYTHING!
