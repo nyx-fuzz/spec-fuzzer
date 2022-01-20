@@ -195,7 +195,7 @@ fn main() {
                 }
     
             }
-            std::thread::sleep(Duration::from_millis(1000*5));
+            std::thread::sleep(Duration::from_millis(1000*60));
         }
     }));
     for t in thread_handles.into_iter() {

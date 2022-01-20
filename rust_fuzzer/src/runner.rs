@@ -138,32 +138,19 @@ fn ijon_buffer(process: &NyxProcess) -> &SharedFeedbackData{
 
 impl FuzzRunner for NyxProcess {
     fn run_test(&mut self) -> Result<TestInfo, Box<dyn Error>>{
+        
+        let res = match self.exec(){
+            NyxReturnValue::Normal                  => ExitReason::Normal(0),
+            NyxReturnValue::Crash                   => ExitReason::Crash(self.aux_misc()),
+            NyxReturnValue::Timeout                 => ExitReason::Timeout,
+            NyxReturnValue::InvalidWriteToPayload   => ExitReason::InvalidWriteToPayload(self.aux_misc()),
+            NyxReturnValue::Abort                   => panic!("Abort called!\n"),
+            _                                       => ExitReason::FuzzerError,
+        };
 
         let feedback_buffer = ijon_buffer(self);
         let ops_used = feedback_buffer.interpreter.executed_opcode_num;
-
-
-        match self.exec(){
-            NyxReturnValue::Normal     => {
-                return Ok(TestInfo {ops_used, exitreason: ExitReason::Normal(0)});
-            },
-            NyxReturnValue::Crash       => {
-                return Ok(TestInfo {ops_used, exitreason: ExitReason::Crash(self.aux_misc())});
-            },
-            NyxReturnValue::Timeout     => {
-                return Ok(TestInfo {ops_used, exitreason: ExitReason::Timeout});
-            },
-            NyxReturnValue::InvalidWriteToPayload => {
-                return Ok(TestInfo {ops_used, exitreason: ExitReason::InvalidWriteToPayload(self.aux_misc())});
-            },
-            NyxReturnValue::Abort       => {
-                panic!("Abort called!\n");
-            },
-            _                  => {
-                println!("unknown exeuction result!!");
-                return Ok(TestInfo {ops_used, exitreason: ExitReason::FuzzerError});
-            },
-        }
+        Ok(TestInfo {ops_used, exitreason: res})
     }
 
     fn run_redqueen(&mut self, workdir: &str, qemu_id: usize) -> Result<RedqueenInfo, Box<dyn Error>>{

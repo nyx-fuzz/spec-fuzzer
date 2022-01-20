@@ -7,16 +7,19 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fuzz_runner={path="../libnyx/fuzz_runner"}
-config={path="../libnyx/config"}
+nix = "0.17.0"
+regex = "1.3.6"
+libnyx={path="../libnyx/libnyx"}
 structured_fuzzer={path="../structured_fuzzer"}
 helpers={path="../helpers"}
 core_affinity="0.5.10"
 serde ="1.0.104"
 serde_derive ="1.0.104"
 rmp-serde ="0.14.3"
-ron = "0.5.1"
+ron="0.6.2"
 clap="2.33.0"
 rand = "0.7.3"
 glob="0.3.0"
 colored = "2.0.0"
+lazy_static = "1.4.0"
+hex="0.4.2"
