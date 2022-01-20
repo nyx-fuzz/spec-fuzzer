@@ -1,8 +1,10 @@
 use crate::bitmap::StorageReason;
 use crate::bitmap::{Bitmap, BitmapHandler};
-use crate::fuzz_runner::FuzzRunner;
-use crate::fuzz_runner::{ExitReason, RedqueenInfo, TestInfo};
-use crate::fuzz_runner::{RedqueenEvent,RedqueenBPType};
+
+use super::runner::FuzzRunner;
+use super::runner::{ExitReason, RedqueenInfo, TestInfo};
+use super::runner::{RedqueenEvent,RedqueenBPType};
+
 use crate::helpers;
 use crate::input::{Input, InputID, InputState};
 use crate::queue::Queue;
@@ -15,7 +17,8 @@ use crate::structured_fuzzer::mutator::{Mutator, MutatorSnapshotState};
 use crate::structured_fuzzer::random::distributions::Distributions;
 use crate::structured_fuzzer::GraphStorage;
 
-use crate::config::{FuzzerConfig, SnapshotPlacement};
+use libnyx::NyxConfig;
+
 
 use std::collections::{HashMap,HashSet};
 //use std::error::Error;
@@ -28,57 +31,28 @@ extern crate colored; // not needed in Rust 2018
 
 use colored::*;
 
-/*
-pub struct StructuredForkServer {
-    srv: ForkServer,
-    input_mmap: &'static mut [u8],
+#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotPlacement {
+    None,
+    Balanced,
+    Aggressive,
 }
 
-impl StructuredForkServer {
-    pub fn new(cfg: &ForkServerConfig, fuzz_cfg: &FuzzerConfig) -> Self {
-        let input_path = "/dev/shm/input_data";
-        let mut cfg = (*cfg).clone();
-        cfg.env.push(format!("STRUCT_INPUT_PATH={}", input_path));
-        let input_mmap = helpers::make_shared_data_from_path(input_path, cfg.input_size);
-        let srv = ForkServer::new(&cfg, &fuzz_cfg);
-
-        return Self { srv, input_mmap };
+impl std::str::FromStr for SnapshotPlacement {
+    type Err = ron::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ron::de::from_str(s)
     }
 }
 
-impl FuzzRunner for StructuredForkServer {
-    fn run_test(&mut self) -> Result<TestInfo, Box<dyn Error>> {
-        self.srv.run_test()
-    }
-
-    fn run_redqueen(&mut self) -> Result<RedqueenInfo, Box<dyn Error>> {
-        self.srv.run_redqueen()
-    }
-    fn run_cfg(&mut self) -> Result<CFGInfo, Box<dyn Error>> {
-        self.srv.run_cfg()
-    }
-    fn run_create_snapshot(&mut self) -> bool {
-        unreachable!();
-    }
-    fn delete_snapshot(&mut self) -> Result<(), Box<dyn Error>> { 
-        unreachable!(); 
-    }
-
-    fn shutdown(self) -> Result<(), Box<dyn Error>> {
-        self.srv.shutdown()
-    }
-    fn input_buffer(&mut self) -> &mut [u8] {
-        return &mut self.input_mmap;
-    }
-    fn bitmap_buffer(&self) -> &[u8] {
-        self.srv.bitmap_buffer()
-    }
-    fn ijon_max_buffer(&self) -> &[u64] {
-        unreachable!()
-    }
-    fn set_input_size(&mut self, _size: usize) {}
+pub struct FuzzConfig{
+    pub cpu_start: usize,
+    pub thread_id: usize,
+    pub snapshot_strategy: SnapshotPlacement,
+    pub exit_after_first_crash: bool,
 }
-*/
+
 pub trait GetStructStorage {
     fn get_struct_storage(&mut self, checksum: u64) -> RefGraph;
 }
@@ -113,16 +87,16 @@ impl FuzzStats{
         }
     }
 
-    pub fn add_execution(&mut self, cfg: &FuzzerConfig, queue: &Queue){
+    pub fn add_execution(&mut self, cfg: &NyxConfig, fuzzer_config: &FuzzConfig, queue: &Queue){
         if self.execs % 1000 == 0{
-            self.write_stats(cfg);
+            self.write_stats(cfg, fuzzer_config);
             queue.update_total_execs(1000);
         }
         self.execs += 1;
     }
 
-    pub fn write_stats(&mut self, cfg: &FuzzerConfig){
-        let mut file = std::fs::File::create(format!("{}/thread_stats_{}.msgp", cfg.workdir_path, cfg.thread_id)).unwrap();
+    pub fn write_stats(&mut self, cfg: &NyxConfig, fuzzer_config: &FuzzConfig){
+        let mut file = std::fs::File::create(format!("{}/thread_stats_{}.msgp", cfg.workdir_path(), fuzzer_config.thread_id)).unwrap();
         let uptime = self.start_time.elapsed().as_secs_f64();
         let last_1000_execs_time = self.last_dump_time.elapsed().as_secs_f64();
         let ser = SerFuzzStats{
@@ -144,15 +118,16 @@ pub struct StructFuzzer<Fuzz: FuzzRunner + GetStructStorage> {
     rng: Distributions,
     mutator: Mutator,
     bitmaps: BitmapHandler,
-    config: FuzzerConfig,
+    config: NyxConfig,
+    fuzzer_config: FuzzConfig,
     stats: FuzzStats,
     //mutation_log: File,
     snapshot_cutoffs: HashMap<InputID, usize>,
 }
 
 impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
-    pub fn new(fuzzer: Fuzz, config: FuzzerConfig, spec: GraphSpec, queue: Queue, seed: u64) -> Self {
-        let rng = Distributions::new(config.dict.clone());
+    pub fn new(fuzzer: Fuzz, config: NyxConfig, fuzzer_config: FuzzConfig, spec: GraphSpec, queue: Queue, seed: u64) -> Self {
+        let rng = Distributions::new(config.dict());
 
         let mutator = Mutator::new(spec);
 
@@ -176,6 +151,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
             mutator,
             bitmaps,
             config,
+            fuzzer_config,
             stats,
             //mutation_log,
             snapshot_cutoffs: HashMap::new(),
@@ -186,7 +162,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
     where
         F: Fn(&mut Mutator, &Queue, &Distributions, &mut RefGraph) -> MutationStrategy,
     {
-        self.stats.add_execution(&self.config, &self.queue);
+        self.stats.add_execution(&self.config, &self.fuzzer_config, &self.queue);
         let (seed_x, seed_y) = (self.master_rng.next_u64(), self.master_rng.next_u64());
         self.rng.set_full_seed(seed_x, seed_y);
         let strategy = {
@@ -269,7 +245,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
             //"[{}] Thread {} Found input {} (len:{}) {}/{} new bytes by {:?}",
             //t,
             "[{}] fuzzer: found input {} (len:{}) {}/{} new bytes by {:?}",
-            self.config.thread_id,
+            self.fuzzer_config.thread_id,
             input_type_colored,
             input.data.node_len(&self.mutator.spec),
             input.storage_reasons.iter().filter(|r| r.has_new_byte()).count(),
@@ -279,7 +255,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
 
         fs::create_dir_all(&format!(
             "{}/corpus/{}",
-            self.config.workdir_path,
+            self.config.workdir_path(),
             input.exit_reason.name()
         ))
         .unwrap();
@@ -298,7 +274,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
             input.data.write_to_file(
                 &format!(
                     "{}/corpus/{}/cnt_{}.bin",
-                    self.config.workdir_path,
+                    self.config.workdir_path(),
                     input.exit_reason.name(),
                     id
                 ),
@@ -320,7 +296,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                     std::fs::write(
                         &format!(
                             "{}/corpus//{}/{}.log",
-                            self.config.workdir_path,
+                            self.config.workdir_path(),
                             input.exit_reason.name(),
                             id,
                         ),
@@ -332,7 +308,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                     std::fs::write(
                         &format!(
                             "{}/corpus//{}/{}.log",
-                            self.config.workdir_path,
+                            self.config.workdir_path(),
                             input.exit_reason.name(),
                             id
                         ),
@@ -400,7 +376,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                     data.write_to_file(
                         &format!(
                             "{}/corpus/normal/cov_{}.bin",
-                            self.config.workdir_path,
+                            self.config.workdir_path(),
                             id.as_usize(),
                         ),
                         &self.mutator.spec,
@@ -418,12 +394,12 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                     */
                     let src = format!(
                         "{}/redqueen_workdir_{}/pt_trace_results.txt",
-                        self.config.workdir_path,
-                        self.config.thread_id
+                        self.config.workdir_path(),
+                        self.fuzzer_config.thread_id
                     );
                     let dst = &format!(
                         "{}/corpus/normal/cov_{}.trace",
-                        self.config.workdir_path,
+                        self.config.workdir_path(),
                         id.as_usize(),
                     );
                     std::fs::copy(&src, &dst)
@@ -435,12 +411,12 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                     std::fs::copy(
                         &format!(
                             "{}/redqueen_workdir_{}/redqueen_results.txt",
-                            self.config.workdir_path,
-                            self.config.thread_id
+                            self.config.workdir_path(),
+                            self.fuzzer_config.thread_id
                         ),
                         &format!(
                             "{}/corpus/normal/cov_{}.rq",
-                            self.config.workdir_path,
+                            self.config.workdir_path(),
                             id.as_usize(),
                         ),
                     )
@@ -493,10 +469,10 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
 
 
         let search_path = if !seed_import {
-                format!("{}/imports/*.bin",self.config.workdir_path)
+                format!("{}/imports/*.bin",self.config.workdir_path())
         }
         else {
-            format!("{}/seeds/*.bin",self.config.workdir_path)
+            format!("{}/seeds/*.bin",self.config.workdir_path())
         };
 
         for entry in glob(&search_path).expect("Failed to read glob pattern") {
@@ -531,7 +507,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
             match entry.state {
                 InputState::Minimize => self.perform_min(&entry),
                 InputState::Havoc => {
-                    match self.config.snapshot_placement {
+                    match self.fuzzer_config.snapshot_strategy {
                         SnapshotPlacement::None => {
                             self.havoc_no_snap(&entry)
                         }
@@ -648,7 +624,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
     fn get_rq_trace(&mut self, graph: &VecGraph) -> RedqueenInfo {
         let mut storage = self.fuzzer.get_struct_storage(self.mutator.spec.checksum);
         storage.copy_from(graph);
-        return self.fuzzer.run_redqueen().unwrap();
+        return self.fuzzer.run_redqueen(&self.config.workdir_path(), self.fuzzer_config.thread_id).unwrap();
     }
 
     fn update_min_graphs(
@@ -831,11 +807,11 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
         //use std::thread;
         use std::time::Duration;
 
-        if self.config.thread_id == 0 {
+        if self.fuzzer_config.thread_id == 0 {
             self.perform_import(true);
         }
         else{
-            while glob(&format!("{}/seeds/*.bin",self.config.workdir_path)).expect("Failed to read glob pattern").count() != 0{
+            while glob(&format!("{}/seeds/*.bin",self.config.workdir_path())).expect("Failed to read glob pattern").count() != 0{
                 std::thread::sleep(Duration::from_millis(1000));
             }
         }
@@ -843,10 +819,10 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
         let mut i = 0;
         loop {
             
-            if self.config.thread_id == 0  && i % 500 == 0 {
+            if self.fuzzer_config.thread_id == 0  && i % 500 == 0 {
                 self.perform_import(false);
             }
-            if self.config.exit_after_first_crash && self.queue.num_crashes() > 0{
+            if self.fuzzer_config.exit_after_first_crash && self.queue.num_crashes() > 0{
                 return;
             }
             i += 1;
@@ -856,5 +832,9 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
 
     pub fn shutdown(&mut self) {
         self.fuzzer.shutdown().unwrap();
+    }
+
+    pub fn set_timeout(&mut self, timeout: std::time::Duration){
+        self.fuzzer.set_timeout(timeout);
     }
 }

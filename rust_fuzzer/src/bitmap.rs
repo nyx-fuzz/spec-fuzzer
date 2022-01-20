@@ -1,4 +1,5 @@
-use crate::fuzz_runner::ExitReason;
+use super::runner::ExitReason;
+
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum StorageReason{

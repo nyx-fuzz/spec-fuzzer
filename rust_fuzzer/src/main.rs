@@ -1,9 +1,13 @@
-extern crate config;
 extern crate core_affinity;
-extern crate fuzz_runner;
 extern crate helpers;
 extern crate serde;
 extern crate structured_fuzzer;
+extern crate libnyx;
+extern crate nix;
+#[macro_use] extern crate lazy_static;
+extern crate regex;
+extern crate hex;
+
 #[macro_use]
 extern crate serde_derive;
 extern crate rmp_serde;
@@ -25,6 +29,7 @@ mod fuzzer;
 mod input;
 mod queue;
 mod romu;
+mod runner;
 
 use rand::thread_rng;
 use crate::rand::Rng;
@@ -33,13 +38,14 @@ use fuzzer::StructFuzzer;
 
 use structured_fuzzer::graph_mutator::spec_loader;
 use crate::romu::*;
-use fuzz_runner::nyx::qemu_process_new_from_kernel;
-use fuzz_runner::nyx::qemu_process_new_from_snapshot;
 
-use fuzz_runner::nyx::qemu_process::QemuProcess;
-
-use config::{Config, FuzzRunnerConfig};
 use colored::*;
+
+use fuzzer::FuzzConfig;
+use fuzzer::SnapshotPlacement;
+use libnyx::NyxConfig;
+use libnyx::NyxProcess;
+
 
 fn main() {
     let matches = App::new("nyx")
@@ -103,90 +109,76 @@ fn main() {
         .expect("need to specify sharedir (-s)")
         .to_string();
 
-    let cfg: Config = Config::new_from_sharedir(&sharedir).unwrap();
 
-    let mut config = cfg.fuzz;
-    let runner_cfg = cfg.runner;
+    let nyx_config = NyxConfig::load(&sharedir).unwrap();
 
+    let cpu_start = if let Ok(start_cpu_id) = value_t!(matches, "cpu_start", usize) {
+        start_cpu_id
+    }
+    else{
+        0
+    };
 
-    if let Some(path) = matches.value_of("workdir") {
-        config.workdir_path = path.to_string();
+    let snapshot_strategy = if let Some(snapshot_placement) = matches.value_of("snapshot_placement") {
+        snapshot_placement.parse().unwrap()
     }
-    if let Ok(start_cpu_id) = value_t!(matches, "cpu_start", usize) {
-        config.cpu_pin_start_at = start_cpu_id;
-    }
-    if let Ok(threads) = value_t!(matches, "threads", usize) {
-        config.threads = threads;
-    }
-    if matches.is_present("exit_after_first_crash") {
-        config.exit_after_first_crash = true;
-    }
+    else{
+        SnapshotPlacement::None
+    };
 
-    if let Some(snapshot_placement) = matches.value_of("snapshot_placement") {
-        config.snapshot_placement = snapshot_placement.parse().unwrap();
+    let threads = if let Ok(threads) = value_t!(matches, "threads", usize) {
+        threads
     }
+    else{
+        1
+    };
 
-    let file = File::open(&config.spec_path).expect(&format!(
+    let file = File::open(&nyx_config.spec_path()).expect(&format!(
         "couldn't open spec (File not found: {}",
-        config.spec_path
+        nyx_config.spec_path()
     ));
+
+    let exit_after_first_crash = matches.is_present("exit_after_first_crash");
+
     let spec = spec_loader::load_spec_from_read(file);
-    let queue = Queue::new(&config);
+    let queue = Queue::new(&nyx_config.clone(), nyx_config.workdir_path().to_string());
 
     let mut thread_handles = vec![];
     let core_ids = core_affinity::get_core_ids().unwrap();
     let seed = value_t!(matches, "cpu_start", u64).unwrap_or(thread_rng().gen());
     let mut rng = RomuPrng::new_from_u64(seed);
 
-    /* prepare workdir */
-    QemuProcess::prepare_workdir(&config.workdir_path, config.seed_path.clone());
-
-    for i in 0..config.threads {
-        let mut cfg = config.clone();
-        cfg.thread_id = i;
+    for i in 0..threads {
+        let nyx_config = nyx_config.clone();
 
         let spec1 = spec.clone();
         let queue1 = queue.clone();
-        let core_id = core_ids[(i + cfg.cpu_pin_start_at) % core_ids.len()].clone();
+        let core_id = core_ids[(i + cpu_start) % core_ids.len()].clone();
         let thread_seed = rng.next_u64();
         let sdir = sharedir.clone();
 
+        let fuzzer_config = FuzzConfig{
+            cpu_start: cpu_start,
+            snapshot_strategy: snapshot_strategy,
+            thread_id: i,
+            exit_after_first_crash: exit_after_first_crash,
+        };
 
-        match runner_cfg.clone() {
-            FuzzRunnerConfig::QemuSnapshot(run_cfg) => {
-                thread_handles.push(thread::spawn(move || {
-                    core_affinity::set_for_current(core_id);
-                    let mut runner = qemu_process_new_from_snapshot(sdir, &run_cfg, &cfg).unwrap();
-                    runner.set_timeout(cfg.time_limit);
-                    let mut fuzzer = StructFuzzer::new(runner, cfg, spec1, queue1, thread_seed);
-                    fuzzer.run();
-                }));
-                //if i == 0 {
-                    std::thread::sleep(Duration::from_millis(100));
-                //}
-            },
-            FuzzRunnerConfig::QemuKernel(run_cfg) => {
-                thread_handles.push(thread::spawn(move || {
-                    println!("[!] fuzzer: spawning qemu instance #{}", i);
-                    core_affinity::set_for_current(core_id);
-                    let mut runner = qemu_process_new_from_kernel(sdir, &run_cfg, &cfg).unwrap();
-                    runner.set_timeout(cfg.time_limit);
-                    let mut fuzzer = StructFuzzer::new(runner, cfg, spec1, queue1, thread_seed);
+        std::thread::sleep(Duration::from_millis(100));
 
-                    fuzzer.run();
-                    fuzzer.shutdown();
-                }));
-                //if i == 0 {
-                    std::thread::sleep(Duration::from_millis(100));
-                //}
-            }
-            //FuzzRunnerConfig::ForkServer(ref run_cfg) => {
-            //    let runner = StructuredForkServer::new(run_cfg, &cfg);
-            //    let mut fuzzer = StructFuzzer::new(runner, cfg, spec.clone(), queue.clone());
-            //    fuzzer.run();
-            //}
-            //_ => unreachable!(), 
-        }
+        thread_handles.push(thread::spawn(move || {
+            println!("[!] fuzzer: spawning qemu instance #{}", i);
+            core_affinity::set_for_current(core_id);
+
+            let runner = NyxProcess::from_config(&sdir, &nyx_config, i as u32, threads > 1).unwrap();
+
+            let timeout = nyx_config.timeout().clone();
+            let mut fuzzer = StructFuzzer::new(runner, nyx_config, fuzzer_config, spec1, queue1, thread_seed);
+
+            fuzzer.set_timeout(timeout);
+            fuzzer.run();
+            fuzzer.shutdown();
+        })); 
     }
     thread_handles.push(thread::spawn(move || {
         let mut num_bits_last = 0;
@@ -203,7 +195,7 @@ fn main() {
                 }
     
             }
-            std::thread::sleep(Duration::from_millis(1000*60));
+            std::thread::sleep(Duration::from_millis(1000*5));
         }
     }));
     for t in thread_handles.into_iter() {

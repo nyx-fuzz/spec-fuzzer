@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use crate::structured_fuzzer::custom_dict::CustomDict;
 use crate::bitmap::{Bitmap, StorageReason};
-use crate::fuzz_runner::ExitReason;
+
+use super::runner::ExitReason;
 use crate::structured_fuzzer::graph_mutator::graph_storage::VecGraph;
 use crate::structured_fuzzer::mutator::MutationStrategy;
 

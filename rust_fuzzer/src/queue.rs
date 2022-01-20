@@ -1,6 +1,7 @@
 use crate::bitmap::{BitmapHandler, StorageReason};
-use crate::config::FuzzerConfig;
-use crate::fuzz_runner::ExitReason;
+use libnyx::NyxConfig;
+
+use super::runner::ExitReason;
 use crate::structured_fuzzer::custom_dict::CustomDict;
 use crate::input::{Input, InputID, InputState};
 use crate::structured_fuzzer::graph_mutator::graph_storage::{GraphStorage, VecGraph};
@@ -51,9 +52,9 @@ impl<'a> InputQueue for Queue {
 }
 
 impl Queue {
-    pub fn new(config: &FuzzerConfig) -> Self {
+    pub fn new(config: &NyxConfig, workdir: String) -> Self {
         return Self {
-            workdir: config.workdir_path.clone(),
+            workdir: workdir,
             start_time: std::time::Instant::now(),
             total_execs: Arc::new(RwLock::new(0_u64)),
             data: Arc::new(RwLock::new(QueueData {
@@ -64,7 +65,7 @@ impl Queue {
                 favqueue: vec![],
                 input_to_iters_no_finds: vec![],
                 bitmap_bits: vec![],
-                bitmaps: BitmapHandler::new(config.bitmap_size),
+                bitmaps: BitmapHandler::new(config.bitmap_size()),
                 next_input_id: 0,
             })),
         };
