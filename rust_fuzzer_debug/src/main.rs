@@ -60,7 +60,7 @@ fn execute_path(runner: &mut fuzz_runner::QemuProcess, target_path: String, dump
             let mut f = File::open(path_str).expect("no file found");
             f.read(runner.payload).expect("buffer overflow");
 
-            runner.send_payload();
+            runner.send_payload().unwrap();
             
             if !quite_mode{
                 print_result(runner, &format!("{:?}", final_path));
@@ -94,7 +94,7 @@ fn execute_file(runner: &mut fuzz_runner::QemuProcess, target_file: &String, dum
 
     let mut f = File::open(target_file).expect("no file found");
     f.read(runner.payload).expect("buffer overflow");
-    runner.send_payload();
+    runner.send_payload().unwrap();
 
     if !quite_mode{
         print_result(runner, target_file);
@@ -203,7 +203,7 @@ fn main() {
         panic!("Neither a target_file nor a target_path has been specififed!");
     }
 
-    let cfg: Config = Config::new_from_sharedir(&sharedir);
+    let cfg: Config = Config::new_from_sharedir(&sharedir).unwrap();
 
 
     let mut config = cfg.fuzz;
@@ -231,11 +231,11 @@ fn main() {
 
     match runner_cfg.clone() {
         FuzzRunnerConfig::QemuSnapshot(cfg) => {
-            let mut runner = qemu_process_new_from_snapshot(sdir, &cfg, &config);
+            let mut runner = qemu_process_new_from_snapshot(sdir, &cfg, &config).unwrap();
             execute(&mut runner, &matches, quite_mode, &config.workdir_path);
         }
         FuzzRunnerConfig::QemuKernel(cfg) => {
-            let mut runner = qemu_process_new_from_kernel(sdir, &cfg, &config);
+            let mut runner = qemu_process_new_from_kernel(sdir, &cfg, &config).unwrap();
             //runner.aux.config.page_dump_mode = 1;
             //runner.aux.config.changed = 1;
 

@@ -103,7 +103,7 @@ fn main() {
         .expect("need to specify sharedir (-s)")
         .to_string();
 
-    let cfg: Config = Config::new_from_sharedir(&sharedir);
+    let cfg: Config = Config::new_from_sharedir(&sharedir).unwrap();
 
     let mut config = cfg.fuzz;
     let runner_cfg = cfg.runner;
@@ -156,7 +156,7 @@ fn main() {
             FuzzRunnerConfig::QemuSnapshot(run_cfg) => {
                 thread_handles.push(thread::spawn(move || {
                     core_affinity::set_for_current(core_id);
-                    let mut runner = qemu_process_new_from_snapshot(sdir, &run_cfg, &cfg);
+                    let mut runner = qemu_process_new_from_snapshot(sdir, &run_cfg, &cfg).unwrap();
                     runner.set_timeout(cfg.time_limit);
                     let mut fuzzer = StructFuzzer::new(runner, cfg, spec1, queue1, thread_seed);
                     fuzzer.run();
@@ -169,7 +169,7 @@ fn main() {
                 thread_handles.push(thread::spawn(move || {
                     println!("[!] fuzzer: spawning qemu instance #{}", i);
                     core_affinity::set_for_current(core_id);
-                    let mut runner = qemu_process_new_from_kernel(sdir, &run_cfg, &cfg);
+                    let mut runner = qemu_process_new_from_kernel(sdir, &run_cfg, &cfg).unwrap();
                     runner.set_timeout(cfg.time_limit);
                     let mut fuzzer = StructFuzzer::new(runner, cfg, spec1, queue1, thread_seed);
 

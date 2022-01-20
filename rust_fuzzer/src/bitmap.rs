@@ -89,6 +89,7 @@ impl BitmapHandler {
 pub struct Bitmap {
     bits: Vec<u8>,
     ijon_max: Vec<u64>,
+    size: usize,
 }
 
 impl Bitmap {
@@ -97,18 +98,20 @@ impl Bitmap {
         return Self {
             bits: vec![0; size],
             ijon_max: vec![0; IJON_MAX_SIZE],
+            size: size,
         };
     }
 
-    pub fn new_from_buffer(buff: &[u8], ijon_buff: &[u64]) -> Self {
+    pub fn new_from_buffer(buff: &[u8], ijon_buff: &[u64], size: usize) -> Self {
         return Self {
             bits: buff.to_vec(),
             ijon_max: ijon_buff.to_vec(),
+            size: size,
         };
     }
 
     pub fn check_new_bytes(&mut self, run_bitmap: &[u8], run_ijon: &[u64]) -> Option<Vec<StorageReason>> {
-        assert_eq!(self.bits.len(), run_bitmap.len());
+        assert_eq!(self.bits.len(), self.size);
         let mut res = None;
         for (i, (old, new)) in self.bits.iter_mut().zip(run_bitmap.iter()).enumerate() {
             if *new > *old && *old == 0{

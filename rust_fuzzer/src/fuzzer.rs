@@ -156,7 +156,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
 
         let mutator = Mutator::new(spec);
 
-        let bitmaps = BitmapHandler::new(fuzzer.bitmap_buffer().len());
+        let bitmaps = BitmapHandler::new(fuzzer.bitmap_buffer_size());
         let master_rng = RomuPrng::new_from_u64(seed);
         let stats = FuzzStats::new();
 
@@ -222,7 +222,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                         data,
                         strategy,
                         new_bytes,
-                        Bitmap::new_from_buffer(self.fuzzer.bitmap_buffer(), self.fuzzer.ijon_max_buffer()),
+                        Bitmap::new_from_buffer(self.fuzzer.bitmap_buffer(), self.fuzzer.ijon_max_buffer(), self.fuzzer.bitmap_buffer_size()),
                         exec_res.exitreason.clone(),
                         ops_used,
                         std::time::Duration::from_millis(0),
@@ -674,7 +674,7 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
             dumped_graph,
             MutationStrategy::MinimizeSplit,
             vec![],
-            Bitmap::new_from_buffer(bitmap, ijon_max),
+            Bitmap::new_from_buffer(bitmap, ijon_max, self.fuzzer.bitmap_buffer_size()),
             exec_res.exitreason,
             ops_used,
             std::time::Duration::from_millis(0),
