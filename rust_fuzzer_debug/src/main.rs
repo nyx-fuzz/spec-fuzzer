@@ -33,12 +33,17 @@ use colored::*;
 
 use std::path::Path;
 use filetime::FileTime;
+use fuzz_runner::nyx::aux_buffer::{NYX_CRASH, NYX_TIMEOUT, NYX_INPUT_WRITE, NYX_ABORT};
 
 
 fn print_result(runner: &mut fuzz_runner::QemuProcess, target_file: &String){
     println!("\n{} {} {}", "**************", target_file.green().bold(), "**************");
     print!("{}", format!("{:#?}", runner.aux.result).yellow());
-    if runner.aux.result.crash_found != 0 || runner.aux.result.asan_found != 0 || runner.aux.result.hprintf != 0 { 
+
+    if runner.aux.result.exec_result_code == NYX_CRASH || 
+        runner.aux.result.exec_result_code == NYX_INPUT_WRITE || 
+        runner.aux.result.exec_result_code == NYX_TIMEOUT || 
+        runner.aux.result.exec_result_code == NYX_ABORT{
         println!("{}", str::from_utf8(&runner.aux.misc.data).unwrap().red());
     }
     println!("");
