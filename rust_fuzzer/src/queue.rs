@@ -1,5 +1,4 @@
 use crate::bitmap::{BitmapHandler, StorageReason};
-use libnyx::NyxConfig;
 
 use super::runner::ExitReason;
 use crate::structured_fuzzer::custom_dict::CustomDict;
@@ -52,7 +51,7 @@ impl<'a> InputQueue for Queue {
 }
 
 impl Queue {
-    pub fn new(config: &NyxConfig, workdir: String) -> Self {
+    pub fn new(workdir: String, bitmap_size: usize) -> Self {
         return Self {
             workdir: workdir,
             start_time: std::time::Instant::now(),
@@ -65,7 +64,7 @@ impl Queue {
                 favqueue: vec![],
                 input_to_iters_no_finds: vec![],
                 bitmap_bits: vec![],
-                bitmaps: BitmapHandler::new(config.bitmap_size()),
+                bitmaps: BitmapHandler::new(bitmap_size),
                 next_input_id: 0,
             })),
         };
