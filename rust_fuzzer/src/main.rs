@@ -110,7 +110,7 @@ fn main() {
         .to_string();
 
 
-    let nyx_config = NyxConfig::load(&sharedir).unwrap();
+    let mut nyx_config = NyxConfig::load(&sharedir).unwrap();
 
     let cpu_start = if let Ok(start_cpu_id) = value_t!(matches, "cpu_start", usize) {
         start_cpu_id
@@ -118,6 +118,10 @@ fn main() {
     else{
         0
     };
+
+    if let Some(path) = matches.value_of("workdir") {
+        nyx_config.set_workdir_path(path.to_string());
+    }
 
     let snapshot_strategy = if let Some(snapshot_placement) = matches.value_of("snapshot_placement") {
         snapshot_placement.parse().unwrap()
