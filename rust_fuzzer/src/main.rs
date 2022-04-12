@@ -142,21 +142,56 @@ fn main() {
         nyx_config.spec_path()
     ));
 
+    /* Start the first Nyx process just before all other threads to retrieve
+     * the final bitmap buffer size to allocate all global bitmap buffers. 
+     * This is done to fully support AFL-LTO executables, which report the 
+     * final bitmap size only during runtime. */   
+
+    let core_ids = core_affinity::get_core_ids().unwrap();
+    println!("[!] fuzzer: spawning qemu instance #{}", 0);
+    core_affinity::set_for_current(core_ids[(0 + cpu_start) % core_ids.len()].clone());
+    let init_runner = NyxProcess::from_config(&sharedir.clone(), &nyx_config, 0 as u32, threads > 1).unwrap();
+    let runtime_bitmap_size = init_runner.bitmap_buffer_size();
+    println!("[!] bitmap_buffer_size: {}", runtime_bitmap_size);
+
     let exit_after_first_crash = matches.is_present("exit_after_first_crash");
 
     let spec = spec_loader::load_spec_from_read(file);
-    let queue = Queue::new(&nyx_config.clone(), nyx_config.workdir_path().to_string());
+    let queue = Queue::new( nyx_config.workdir_path().to_string(), runtime_bitmap_size);
 
     let mut thread_handles = vec![];
-    let core_ids = core_affinity::get_core_ids().unwrap();
     let seed = value_t!(matches, "cpu_start", u64).unwrap_or(thread_rng().gen());
     let mut rng = RomuPrng::new_from_u64(seed);
+    let init_thread_seed = rng.next_u64();
 
-    for i in 0..threads {
+    {
+        let nyx_config = nyx_config.clone();
+        let spec = spec.clone();
+        let queue = queue.clone();
+
+        let fuzzer_config = FuzzConfig{
+            cpu_start: cpu_start,
+            snapshot_strategy: snapshot_strategy,
+            thread_id: 0,
+            exit_after_first_crash: exit_after_first_crash,
+        };
+
+        thread_handles.push(thread::spawn(move || {
+            let timeout = nyx_config.timeout().clone();
+            let mut fuzzer = StructFuzzer::new(init_runner, nyx_config, fuzzer_config, spec, queue, init_thread_seed);
+
+            fuzzer.set_timeout(timeout);
+            fuzzer.run();
+            fuzzer.shutdown();
+            
+        })); 
+    }
+
+    for i in 1..threads {
         let nyx_config = nyx_config.clone();
 
-        let spec1 = spec.clone();
-        let queue1 = queue.clone();
+        let spec = spec.clone();
+        let queue = queue.clone();
         let core_id = core_ids[(i + cpu_start) % core_ids.len()].clone();
         let thread_seed = rng.next_u64();
         let sdir = sharedir.clone();
@@ -174,10 +209,10 @@ fn main() {
             println!("[!] fuzzer: spawning qemu instance #{}", i);
             core_affinity::set_for_current(core_id);
 
-            let runner = NyxProcess::from_config(&sdir, &nyx_config, i as u32, threads > 1).unwrap();
+            let runner = NyxProcess::from_config(&sdir, &nyx_config, i as u32, true).unwrap();    
 
             let timeout = nyx_config.timeout().clone();
-            let mut fuzzer = StructFuzzer::new(runner, nyx_config, fuzzer_config, spec1, queue1, thread_seed);
+            let mut fuzzer = StructFuzzer::new(runner, nyx_config, fuzzer_config, spec, queue, thread_seed);
 
             fuzzer.set_timeout(timeout);
             fuzzer.run();

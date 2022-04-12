@@ -402,8 +402,12 @@ impl<Fuzz: FuzzRunner + GetStructStorage> StructFuzzer<Fuzz> {
                         self.config.workdir_path(),
                         id.as_usize(),
                     );
-                    std::fs::copy(&src, &dst)
-                    .expect(&format!("couldn't copy trace from {} to {}", src,dst));
+                    
+                    if std::path::Path::new(&src).exists() {
+                        std::fs::copy(&src, &dst)
+                        .expect(&format!("couldn't copy trace from {} to {}", src,dst));
+                        std::fs::remove_file(&src).unwrap();
+                    }
 
                     let info = self.get_rq_trace(&data);
                     let dict = Self::custom_dict_from_rq_data(&info.bps);
